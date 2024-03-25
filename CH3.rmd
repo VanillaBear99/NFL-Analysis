@@ -1,0 +1,113 @@
+---
+title: "Chapter 3"
+output: html_notebook
+---
+
+
+Loading libraries, getting play by play data and filtering for run plays. Setting all null value runs to 0.
+```{r}
+library(tidyverse)
+library(nflfastR)
+
+playByPlay = load_pbp(2016:2023)
+
+runningPlays =
+        playByPlay |>
+                filter(play_type == "run" & !is.na(rusher_id))|>
+                mutate(rushing_yards = ifelse(is.na(rushing_yards), 0, rushing_yards))
+```
+
+
+
+Constructing some plots
+```{r}
+ggplot(runningPlays, aes(x=ydstogo, y=rushing_yards)) +
+        geom_point() +
+        theme_bw() +
+        stat_smooth(method="lm")
+
+```
+Yards to go plotted against rushing yards
+We can see that rushing yards increase as yards to go increases, albeit very slightly.
+
+
+```{r}
+runAverage =
+        runningPlays |>
+                group_by(ydstogo) |>
+                summarize(ypc = mean(rushing_yards))
+
+ggplot(runAverage, aes(x = ydstogo, y = ypc)) +
+        geom_point() +
+        theme_bw() +
+        stat_smooth(method="lm")
+```
+Average yards per car by yards to go. There is a positive linear relationship between yards per carry and yards to go.
+
+
+
+```{r}
+yardsToGo = lm(rushing_yards ~ 1 + ydstogo, data= runningPlays)
+summary(yardsToGo)
+```
+```{r}
+runningPlays <-
+        runningPlays |>
+                mutate(ryoe = resid(yardsToGo))
+
+ryoe <-
+        runningPlays |>
+                group_by(season, rusher_id, rusher) |>
+                summarize(
+                  n = n(),
+                  ryoe_total = sum(ryoe),
+                  ryoe_per = mean(ryoe),
+                  yards_per_carry = mean(rushing_yards)
+                ) |>
+                arrange(-ryoe_total) |>
+                filter(n > 50)
+
+print(ryoe)
+```
+
+
+
+
+```{r}
+ryoe |>
+        arrange(-ryoe_per)
+
+```
+
+
+
+```{r}
+ryoe_now =
+        ryoe |>
+                select(-n, -ryoe_total)
+
+ryoe_last =
+        ryoe |>
+                select(-n, -ryoe_total) |>
+                mutate(season = season + 1) |>
+                rename(ryoe_per_last = ryoe_per, yards_per_carry_last = yards_per_carry)
+
+ryoe_lag =
+        ryoe_now |>
+                inner_join(ryoe_last, by = c("rusher_id", "rusher", "season")) |>
+                ungroup()
+
+ryoe_lag |>
+        select(yards_per_carry, yards_per_carry_last) |>
+        cor(use = "complete.obs")
+
+ryoe_lag |>
+        select(ryoe_per, ryoe_per_last) |>
+        cor(use = "complete.obs")
+```
+```{r}
+
+
+
+```
+

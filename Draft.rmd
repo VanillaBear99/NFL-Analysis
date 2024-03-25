@@ -1,0 +1,95 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+The [R plugin](https://www.jetbrains.com/help/pycharm/r-plugin-support.html) for IntelliJ-based IDEs provides
+handy capabilities to work with the [R Markdown](https://www.jetbrains.com/help/pycharm/r-markdown.html) files.
+To [add](https://www.jetbrains.com/help/pycharm/r-markdown.html#add-code-chunk) a new R chunk,
+position the caret at any line or the code chunk, then click "+".
+
+The code chunk appears:
+```{r}
+library(nflfastR)
+library(janitor)
+library(tidyverse)
+library(rvest)
+library(htmlTable)
+library(zoo)
+
+
+
+```
+
+Type any R code in the chunk, for example:
+```{r}
+draft = tibble()
+for(i in seq(from = 2000, to = 2023)) {
+  url <- paste0(
+    "https://www.pro-football-reference.com/years/",
+    i,
+    "/draft.htm"
+  )
+  web_data <-
+    read_html(url) |>
+      html_nodes(xpath = '//*[@id="drafts"]') |>
+      html_table()
+  web_df <-
+    web_data[[1]]
+  web_df_clean <-
+    web_df |>
+      janitor::row_to_names(row_number = 1) |>
+      janitor::clean_names(case = "none") |>
+      mutate(Season = i) |>
+      filter(Tm != "Tm")
+
+  draft <-
+    bind_rows(
+      draft, web_df_clean
+    )
+}
+
+
+```
+
+
+
+
+```{r}
+combine = tibble()
+
+for(i in seq(from = 2000, to = 2023)) {
+  url <- paste0(
+          "https://www.pro-football-reference.com/draft/",
+          i,
+          "-combine.htm"
+  )
+  web_data <-
+          read_html(url) |>
+                  html_nodes(xpath = '//*[@id="combine"]') |>
+                  html_table()
+  web_df <-
+          web_data[[1]]
+  combine <-
+          bind_rows(
+                  combine, web_df
+          )
+}
+
+```
+
+
+
+
+```{r}
+
+
+```
+
+
+
+
+
+```{r}
+
+```

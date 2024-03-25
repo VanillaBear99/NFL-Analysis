@@ -1,0 +1,294 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+Load Dependencies/Libraries
+```{r}
+library("tidyverse")
+library("nflfastR")
+library("ggthemes")
+
+```
+Loading in play by play data and filtering into passing plays that were not batted, thrown away, spiked, or negated by penalty
+```{r}
+playByPlay = load_pbp(2016:2023)
+passingPlays =
+        playByPlay |>
+                filter(play_type == "pass" & !is.na(air_yards))
+summary(passingPlays)
+```
+
+We perform some data wrangling, we define passes as long if they have 20 or more air yards and short otherwise. We also set the passing yards for incomplete passes from NA to 0
+```{r}
+passingPlays <-
+        passingPlays |>
+                mutate(
+                  pass_length_air_yards = ifelse(air_yards >= 20, "long", "short"),
+                  passing_yards = ifelse(is.na(passing_yards), 0, passing_yards)
+                )
+```
+Quick summary for passing stats for all passes, short, and long on passing yards.
+
+```{r}
+passingPlays |>
+        pull(passing_yards) |>
+        summary()
+
+passingPlays |>
+        filter(pass_length_air_yards == "short") |>
+        pull(passing_yards) |>
+        summary()
+passingPlays |>
+  filter(pass_length_air_yards == "long") |>
+  pull(passing_yards) |>
+  summary()
+
+
+```
+We notice that the interquartile range is muh larger for long passes than short passes, understandably.
+
+Now we do the same for epa
+
+```{r}
+passingPlays |>
+  pull(epa) |>
+  summary()
+passingPlays |>
+  filter(pass_length_air_yards == "long") |>
+  pull(epa) |>
+  summary()
+passingPlays |>
+  filter(pass_length_air_yards == "short") |>
+  pull(epa) |>
+  summary()
+
+
+```
+
+Here we notice the mean EPA is much higher for long passes compared to short passes but with a lower median.
+
+```{r}
+ggplot(playByPlay, aes(x=passing_yards)) +
+        geom_histogram()
+```
+
+
+```{r}
+passingPlays |>
+        filter(pass_length_air_yards == "long") |>
+        ggplot(aes(passing_yards)) +
+        geom_histogram(binwidth=1) +
+        ylab("Count") +
+        xlab("Yards gained or lost during passing plays on long passes") +
+        theme_bw()
+
+passingPlays |>
+  filter(pass_length_air_yards == "short") |>
+  ggplot(aes(passing_yards)) +
+  geom_histogram(binwidth=1) +
+  ylab("Count") +
+  xlab("Yards gained or lost during passing plays on short passes") +
+  theme_bw()
+```
+
+
+
+```{r}
+ggplot(passingPlays, aes(x=pass_length_air_yards, y=passing_yards)) +
+        geom_boxplot()+
+        theme_bw()+
+        xlab("Pass length in air yards (long >=20, short <20") +
+        ylab("Yards gained or lost during a passing play")
+```
+
+
+Get the individual passing seasons and the average yards per attempt, sorted descending
+```{r}
+passingSeasons =
+        passingPlays |>
+                group_by(passer_player_name, passer_player_id, season) |>
+                summarize(
+                  ypa = mean(passing_yards, na.rm = TRUE),
+                  n = n(),
+                  .groups = "drop"
+                )
+
+passingSeasons |>
+        arrange(-ypa) |>
+        print()
+```
+
+
+Do the same but for those with at least 100 attempts in a season
+```{r}
+passing100 =
+        passingPlays |>
+                group_by(passer_id, passer, season) |>
+                summarize(
+                  n = n(), ypa = mean(passing_yards),
+                  .groups="drop"
+                ) |>
+                filter(n >= 100) |>
+                arrange(-ypa)
+
+passing100 |>
+        print(n = 20)
+```
+
+
+```{r}
+air_yards =
+        passingPlays |>
+                select(passer_id, passer, season, pass_length_air_yards, passing_yards) |>
+                arrange(passer_id, season, pass_length_air_yards) |>
+                group_by(passer_id, passer, pass_length_air_yards, season) |>
+                summarize(n = n(), ypa = mean(passing_yards), .groups="drop") |>
+                filter((n >=100 & pass_length_air_yards == "short") | (n >= 30 & pass_length_air_yards == "long")) |>
+                select(-n)
+
+
+
+air_yards_lag =
+        air_yards |>
+                mutate(season = season+1) |>
+                rename(ypa_last = ypa)
+
+
+passingYPA =
+        air_yards |>
+                inner_join(air_yards_lag, by = c("passer_id", "pass_length_air_yards", "season", "passer"))
+
+passingYPA |>
+        filter(passer %in% c("T.Brady", "A.Rodgers")) |>
+        print(n = Inf)
+```
+
+
+
+```{r}
+scatter_ypa =
+        ggplot(passingYPA, aes(x=ypa_last, y = ypa)) +
+                geom_point() +
+                facet_grid(cols=vars(pass_length_air_yards)) +
+                labs(
+                  x="Yards per attempt, year n",
+                  y="Yards per attempt, Year n + 1"
+                ) +
+                theme_bw() +
+                theme(strip.background = element_blank())
+
+print(scatter_ypa)
+```
+
+
+```{r}
+scatter_ypa + geom_smooth(method="lm")
+```
+
+
+```{r}
+passingPlays |>
+        ggplot(aes(epa)) +
+        geom_histogram() +
+        ylab("Count") +
+        xlab("EPA gained or lost on passing plays") +
+        theme_bw()
+passingPlays |>
+  filter(pass_length_air_yards == "short") |>
+  ggplot(aes(epa)) +
+  geom_histogram() +
+  ylab("Count") +
+  xlab("EPA gained or lost on short passing plays") +
+  theme_bw()
+passingPlays |>
+  filter(pass_length_air_yards == "long") |>
+  ggplot(aes(epa)) +
+  geom_histogram() +
+  ylab("Count") +
+  xlab("EPA gained or lost on long passing plays") +
+  theme_bw()
+
+```
+
+
+
+
+
+
+
+```{r}
+ggplot(passingPlays, aes(x = pass_length_air_yards, y = epa)) +
+        geom_boxplot() +
+        theme_bw() +
+        xlab("Pass length") +
+        ylab("EPA gained or lost")
+```
+
+```{r}
+passingEPA =
+        passingPlays |>
+                group_by(passer_id, passer, season) |>
+                summarize(n = n(), epaPerPlay = mean(epa), .groups = "drop") |>
+                filter(n >= 100) |>
+                arrange(-epaPerPlay)
+passingEPA |>
+        print(ns=20)
+```
+
+
+
+```{r}
+epaByAirYards =
+        passingPlays |>
+                select(passer_id, passer, season, pass_length_air_yards, epa) |>
+                arrange(passer_id, season, pass_length_air_yards) |>
+                group_by(passer_id, passer, pass_length_air_yards, season) |>
+                summarize(n = n(), epaPerPlay = mean(epa), .groups = "drop") |>
+                filter((n >= 100 & pass_length_air_yards == "short") | (n >= 30 & pass_length_air_yards == "long")) |>
+                select(-n)
+
+
+epaLag =
+        epaByAirYards |>
+                mutate(season = season + 1) |>
+                rename(epaLast = epaPerPlay)
+
+totalEPA =
+        epaByAirYards |>
+                inner_join(epaLag, by = c("passer_id", "pass_length_air_yards", "season", "passer"))
+
+
+```
+
+
+
+```{r}
+scatterEPA =
+        ggplot(totalEPA, aes(x=epaLast, y=epaPerPlay)) +
+                geom_point()+
+                facet_grid(cols=vars(pass_length_air_yards)) +
+                labs(
+                  x = "EPA per play, Year n",
+                  y = "EPA per play, Year n + 1"
+                ) +
+                theme_bw() +
+                theme(strip.background = element_blank())
+
+print(scatterEPA)
+
+```
+
+
+
+```{r}
+scatterEPA + geom_smooth(method="lm")
+```
+
+
+
+```{r}
+totalEPA |>
+        filter(!is.na(epaPerPlay) & !is.na(epaLast)) |>
+        group_by(pass_length_air_yards) |>
+        summarize(correlation = cor(epaPerPlay, epaLast))
+```

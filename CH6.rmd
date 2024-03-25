@@ -1,0 +1,301 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+The [R plugin](https://www.jetbrains.com/help/pycharm/r-plugin-support.html) for IntelliJ-based IDEs provides
+handy capabilities to work with the [R Markdown](https://www.jetbrains.com/help/pycharm/r-markdown.html) files.
+To [add](https://www.jetbrains.com/help/pycharm/r-markdown.html#add-code-chunk) a new R chunk,
+position the caret at any line or the code chunk, then click "+".
+
+The code chunk appears:
+```{r}
+library(nflfastR)
+library(tidyverse)
+```
+
+Load in the data and filter for passing plays
+```{r}
+playByPlay =
+        load_pbp(2016:2023)
+
+passingPlay =
+        playByPlay |>
+                filter(!is.na(passer_id))
+```
+
+
+Next we will repalce the NUll or NA values with 0 for pass_touchdown, then we will aggregate by season, week, passer_id, and passer to calculate the number of passes per week and the number of tocuhdown passes per week. We will exclude players will less than 10 plays as a passer for each week Last, we'll save the total_line
+```{r}
+passing_tds =
+        passingPlays |>
+                mutate(pass_touchdown = ifelse(is.na(pass_touchdown), 0, pass_touchdown)) |>
+                group_by(season, week, passer_id, passer) |>
+                summarize(
+                  n=n(),
+                  pass_td_y = sum(pass_touchdown),
+                  total_line = mean(total_line)
+                ) |>
+                filter(n >=10)
+
+passing_tds |>
+        group_by(pass_td_y) |>
+        summarize(n = n())
+```
+
+
+
+
+```{r}
+passing_tds |>
+        ungroup() |>
+        select(-passer, -passer_id) |>
+        summary()
+```
+
+
+We want to see if poisson is a reasonable distribution, so we look at a histogram of the frquencies and compare it with a Poisson distribution
+
+```{r}
+pass_td_mean =
+        passing_tds |>
+                pull(pass_td_y) |>
+                mean()
+
+plot_pos =
+        tibble(x = seq(0, 7)) |>
+                mutate(expected = dpois(
+                  x = x, lambda = pass_td_mean
+                ))
+
+ggplot() +
+        geom_histogram(
+          data=passing_tds,
+          aes(
+            x=pass_td_y,
+            y=after_stat(count / sum(count))
+          ),
+          bindwidth = 0.5
+        ) +
+        geom_line(
+          data=plot_pos, aes(x =x ,y= expected), color = "red", linewidth=1
+        ) +
+        theme_bw() +
+        xlab("Touchdown passes per player per game for 2016 to 2023") +
+        ylab("Probability")
+
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+pass_td_geq10 =
+        passing_tds |>
+                filter(n >= 10)
+x = tibble()
+
+for (season_idx in seq(2017, 2023)) {
+  for(week_idx in seq(1,22)) {
+    week_calc =
+      pass_td_geq10 |>
+        filter((season == (season_idx -1)) |
+                 (season == season_idx & week < week_idx)) |>
+        group_by(passer_id, passer) |>
+        summarize(
+          n_games = n(),
+          pass_td_rate = mean(pass_td_y),
+          .groups = "keep"
+        ) |>
+        mutate(season = season_idx, week = week_idx)
+    x = bind_rows(x, week_calc)
+  }
+}
+
+
+
+
+
+```
+
+
+
+
+
+
+```{r}
+x |>
+        filter(passer == "P.Mahomes") |>
+        tail()
+```
+The books have set a decent number on Mahomes passing td totals
+
+
+We will create a response varaible which is the dataframe we created along with the added game total
+```{r}
+pass_td_geq10 =
+        pass_td_geq10 |>
+                inner_join(x, by = c("season", "week", "passer_id", "passer"))
+
+pass_td_geq10
+```
+
+
+
+
+We plot passing touchdowns in each game for each passer by using a line
+
+
+```{r}
+weekly_passing_id_plot =
+        pass_td_geq10 |>
+                ggplot(aes(x = week, y = pass_td_y, group=passer_id)) +
+                geom_line(alpha = 0.25) +
+                facet_wrap(vars(season), nrow = 3) +
+                theme_bw() +
+                theme(strip.background = element_blank()) +
+                ylab("Total passing touchdowns") +
+                xlab("Week of season")
+
+weekly_passing_id_plot
+```
+
+This shows the variability in passing touchdowns per game. The values seem to be constant and there's no obvious trend. We now add a Poisson regression lin
+
+
+```{r}
+weekly_passing_id_plot +
+        geom_smooth(method='glm', method.args = list("family" = "poisson"), se = FALSE, linewidth = 0.5, color ='blue', aplha=0.25)
+```
+
+
+
+
+We now fit the model, save the outputs and look at the summary
+
+```{r}
+pass_fit =
+        glm(pass_td_y ~ pass_td_rate.x + total_line, data = pass_td_geq10, family = "poisson")
+
+pass_td_geq10 =
+  pass_td_geq10 |>
+    ungroup() |>
+    mutate(exp_pass_td = predict(pass_fit, type="response"))
+
+summary(pass_fit)|>
+  print()
+
+
+```
+
+
+
+```{r}
+library(broom)
+tidy(pass_fit, exponentiate = TRUE, conf.int = TRUE)
+```
+
+
+
+```{r}
+pass_td_geq10 |>
+        filter(passer == "P.Mahomes", season == 2022, week ==22) |>
+        select(-pass_td_y, -passer_id, -week, -season, -n_games.x)
+```
+
+
+WE use the dpois() function to give the probability of zero, one or two touchdown passes
+
+```{r}
+pass_td_geq10 =
+        pass_td_geq10 |>
+                mutate(
+                  p_0_td = dpois(x = 0, lambda = exp_pass_td),
+                  p_1_td = dpois(x = 1, lambda = exp_pass_td),
+                  p_2_td = dpois(x = 2, lambda = exp_pass_td),
+                  p_g2_td = ppois(q = 2, lambda = exp_pass_td, lower.tail = FALSE)
+                )
+
+pass_td_geq10 |>
+        filter(passer == "P.Mahomes", season == 2022, week == 22) |>
+        select(-pass_td_y, -n_games.x, -n, -passer_id, -week, -season)
+```
+
+
+```{r}
+x = rpois(n = 10, lambda = 1)
+print(x)
+print(mean(x))
+```
+
+
+```{r}
+library(broom)
+glm_out = glm(x ~1, family = "poisson")
+
+print(tidy(glm_out))
+```
+
+```{r}
+print(tidy(glm_out, exponentiate = TRUE))
+```
+
+
+```{r}
+bal_td =
+        playByPlay |>
+                filter(posteam == "BAL" & season == 2022) |>
+                group_by(game_id, week) |>
+                summarize(
+                  td_per_game = sum(touchdown, na.rm = TRUE),
+                  .groups = "drop"
+                ) |>
+                mutate(week = week -1)
+
+ggplot(bal_td, aes(x = week, y = td_per_game)) +
+        geom_point() +
+        theme_bw() +
+        stat_smooth(
+          method = "glm", formula = "y~x", method.args = list(family = "poisson")
+        ) +
+        xlab("Week") +
+        ylab("Touchdowns per game") +
+        scale_y_continuous(breaks = seq(0, 6)) +
+        scale_x_continuous(breaks = seq(1, 20, by = 2))
+
+
+
+
+
+
+
+```
+
+
+```{r}
+glm_bal_td =
+        glm(td_per_game ~ week, data = bal_td, family = "poisson")
+
+print(tidy(glm_bal_td))
+print(tidy(glm_bal_td, exponentiate = TRUE))
+```
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,370 @@
+---
+title: "Chapter 4"
+output: html_notebook
+---
+
+First we create a demonstration dataset and then create a model matrix
+```{r}
+library(tidyverse)
+
+demoData = tibble(down = c("first", "second"), ydstogo = c(10, 5))
+
+model.matrix(~ydstogo + down, data = demoData)
+```
+
+
+```{r}
+model.matrix(~ydstogo + down - 1, data = demoData)
+```
+
+First we load in the data and fitler for running plays and removal any non-normal downs/plays
+```{r}
+library(nflfastR)
+
+playByPlay = load_pbp(2016:2023)
+
+runningPlays =
+        playByPlay |>
+                filter(play_type == "run" & !is.na(rusher_id) & !is.na(down) & !is.na(run_location)) |>
+                mutate(rushing_yards = ifelse(is.na(rushing_yards), 0 , rushing_yards))
+```
+
+
+
+Next we create a histogram for rushing yards by downs to go.
+```{r}
+#Change down to be an integer
+runningPlays =
+        runningPlays |>
+                mutate(down = as.character(down))
+
+ggplot(runningPlays, aes(x=rushing_yards)) +
+        geom_histogram(binwidth=1) +
+        facet_wrap(vars(down), ncol=2, labeller=label_both) +
+        theme_bw() +
+        theme(strip.background = element_blank())
+```
+
+Filter for only plays with 10 yards to go
+```{r}
+runningPlays |>
+        filter(ydstogo == 10) |>
+        ggplot(aes(x=down, y=rushing_yards)) +
+        geom_boxplot() +
+        theme_bw()
+
+```
+
+
+```{r}
+ggplot(runningPlays, aes(x=yardline_100, y=rushing_yards)) +
+        geom_point(alpha=0.25) +
+        stat_smooth(method="lm") +
+        theme_bw()
+```
+
+
+
+```{r}
+runningPlays |>
+        group_by(yardline_100) |>
+        summarize(rushing_yards_mean = mean(rushing_yards)) |>
+        ggplot(aes(x=yardline_100, y=rushing_yards_mean)) +
+        geom_point() +
+        stat_smooth(method="lm") +
+        theme_bw()
+```
+
+
+
+
+```{r}
+ggplot(runningPlays, aes(run_location, rushing_yards)) +
+        geom_boxplot() +
+        theme_bw()
+```
+
+
+
+```{r}
+runningPlays |>
+        group_by(score_differential) |>
+        summarize(rushing_yards_mean = mean(rushing_yards)) |>
+        ggplot(aes(score_differential, rushing_yards_mean)) +
+        geom_point() +
+        stat_smooth(method="lm") +
+        theme_bw()
+
+
+```
+
+
+The model predicts rushing yards by creating the following
+    1. An intercept
+    A term contrasting the second, third and fourth downs to first down
+    A coefficient for ydstogo
+    An interaction between ystogo and down that estimates a ydstogo contrast for each down
+    A coefficient for yards to go to the endzone
+    The location of the running play on the field
+    The difference between each teams scores
+
+```{r}
+runningPlays =
+        runningPlays |>
+                mutate(down = as.character(down))
+
+expectedYards = lm(rushing_yards ~ 1 + down + ydstogo + down:ydstogo + yardline_100 + run_location + score_differential, data=runningPlays)
+
+runningPlays =
+        runningPlays |>
+                mutate(ryoe=resid(expectedYards))
+
+print(summary(expectedYards))
+```
+```{r}
+install.packages("kableExtra")
+```
+
+
+
+```{r}
+library(broom)
+library(kableExtra)
+
+
+
+```
+
+
+
+
+
+```{r}
+ryoe =
+        runningPlays |>
+                group_by(season, rusher_id, rusher) |>
+                summarize(
+                  n = n(), ryoe_total = sum(ryoe), ryoe_per = mean(ryoe), yards_per_carry = mean(rushing_yards)
+                ) |>
+                filter(n > 100)
+
+
+ryoe |>
+        arrange(-ryoe_total) |>
+        print()
+
+```
+
+
+
+
+```{r}
+ryoe |>
+        filter(n > 100) |>
+        arrange(-ryoe_per) |>
+        print()
+
+```
+
+
+
+```{r}
+ryoe_now =
+        ryoe |>
+                select(-n, -ryoe_total)
+
+ryoe_last =
+        ryoe |>
+                select(-n, -ryoe_total) |>
+                mutate(season = season + 1) |>
+                rename(ryoe_per_last = ryoe_per, yards_per_carry_last = yards_per_carry)
+
+ryoe_lag =
+        ryoe_now |>
+                inner_join(ryoe_last, by = c("rusher_id", "rusher", "season")) |>
+                ungroup()
+
+
+ryoe_lag |>
+        select(yards_per_carry, yards_per_carry_last) |>
+        cor(use = "complete.obs")
+
+
+ryoe_lag |>
+        select(ryoe_per, ryoe_per_last) |>
+        cor(use = "complete.obs")
+
+
+```
+
+
+
+
+
+
+
+
+```{r}
+expected_yards_filter =
+        runningPlays |>
+                filter(rushing_yards > 15 & rushing_yards < 90) |>
+                lm(formula = rushing_yards ~ 1 + down + ydstogo + down:ydstogo + yardline_100 + run_location + score_differential)
+
+par(mfrow = c(2,2))
+plot(expected_yards_filter)
+```
+
+
+
+
+
+
+
+
+
+```{r}
+library(nflfastR)
+
+
+
+playByPlay = load_pbp(2016:2023)
+
+passingPlays = playByPlay |>
+        filter(play_type == "pass" & !is.na(receiver_id) & !is.na(down))
+
+```
+
+
+```{r}
+passingPlays = playByPlay |>
+  filter(play_type == "pass" & !is.na(receiver_id) & !is.na(down))
+
+passingPlays =
+        passingPlays |>
+                mutate(passing_yards = ifelse(is.na(passing_yards), 0, passing_yards), down = as.character(down))
+
+
+ggplot(passingPlays, aes(x = passing_yards)) +
+        geom_histogram(binwidth = 1) +
+        facet_wrap(vars(down), ncol = 2, labeller = label_both) +
+        theme_bw() +
+        theme(strip.background = element_blank())
+
+
+```
+Passing yards frequency seems to decrease on third down, which makes sense since it is more difficult to pass on third down.
+
+```{r}
+passingPlays |>
+        filter(ydstogo < 10) |>
+        ggplot(aes(x = down, y = passing_yards)) +
+        geom_boxplot() +
+        theme_bw()
+```
+The median passing yards decreases for each down even though the yards to go is the same. If it's greater than 10, there is no discenable trend, and if it's less than 10 it's significantly lower on first down, though this is a smaller sample size due to this occurence only happening in the low redzone or due to penalty
+
+```{r}
+ggplot(passingPlays, aes(x = yardline_100, y = passing_yards)) +
+        geom_point(alpha = 0.25) +
+        stat_smooth(method = "lm") +
+        theme_bw()
+```
+
+
+```{r}
+passingPlays |>
+        group_by(ydstogo) |>
+        summarize(passing_yards_mean = mean(passing_yards))  |>
+        ggplot(aes(x = ydstogo, y = passing_yards_mean)) +
+        geom_point() +
+        stat_smooth(method = "lm") +
+        theme_bw()
+```
+This shows a clear trend that as the yards to go increases, the mean passing yards increases
+
+```{r}
+passingPlays |>
+  group_by(yardline_100) |>
+  summarize(passing_yards_mean = mean(passing_yards))  |>
+  ggplot(aes(x = yardline_100, y = passing_yards_mean)) +
+  geom_point() +
+  stat_smooth(method = "lm") +
+  theme_bw()
+```
+
+This shows the same, that as distance from the endzone increases, the mean passing yards increases
+
+
+```{r}
+
+passingPlays =  passingPlays |>
+  filter(!is.na(pass_location))
+ggplot(passingPlays, aes(pass_location, passing_yards)) +
+        geom_boxplot() +
+        theme_bw()
+```
+
+Shows a clear difference in efficiency between pass locations as well
+
+```{r}
+passingPlays |>
+        group_by(score_differential) |>
+        summarize(passing_yards_mean = mean(passing_yards)) |>
+        ggplot(aes(score_differential, passing_yards_mean)) +
+        geom_point() +
+        stat_smooth(method = "lm") +
+        theme_bw()
+```
+Shows an upward trend in average pass yards as score differential increases as well
+
+
+
+We will be creating the following model for passing yards
+    An Intercept
+    A term contrasting the second, third and fourth downs to fourth down
+    A coefficient for yards to go
+    An interaction for ydstogo and down
+    A coefficient for yards to endzone
+    A coefficient for pass location
+    A coefficient for score differential
+    A coefficient for air_yards
+    An interaction for air_yards and down
+
+
+```{r}
+passingPlays =
+        passingPlays |>
+          filter(!is.na(air_yards)) |>
+                mutate(down = as.character(down))
+
+
+expected_yards =
+        lm(passing_yards ~ 1 + down + ydstogo + down:ydstogo + yardline_100 + pass_location + score_differential + air_yards + air_yards:down, data = passingPlays)
+
+passingPlays =
+        passingPlays |>
+                mutate(ryoe = resid(expected_yards))
+
+print(expected_yards)
+
+```
+
+
+```{r}
+library(broom)
+library(kableExtra)
+library(tidyverse)
+```
+
+
+
+```{r}
+pyoe =
+        passingPlays |>
+                group_by(season, passer_id, passer) |>
+                summarize(
+                  n=n(), pyoe_total = sum(pyoe), ryoe_per = mean(pyoe), yards_per_attempt = mean(passing_yards)
+                ) |>
+                filter(n > 100)
+
+```

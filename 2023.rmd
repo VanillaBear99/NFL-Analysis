@@ -1,0 +1,37 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+The [R plugin](https://www.jetbrains.com/help/pycharm/r-plugin-support.html) for IntelliJ-based IDEs provides
+handy capabilities to work with the [R Markdown](https://www.jetbrains.com/help/pycharm/r-markdown.html) files.
+To [add](https://www.jetbrains.com/help/pycharm/r-markdown.html#add-code-chunk) a new R chunk,
+position the caret at any line or the code chunk, then click "+".
+
+The code chunk appears:
+```{r}
+library(nflfastR)
+library(broom)
+library(tidyverse)
+library(ggplot2)
+
+
+```
+
+Type any R code in the chunk, for example:
+```{r}
+playByPlay2023 = load_pbp(2023)
+playByPlay2022 = load_pbp(2022)
+
+```
+
+
+```{r}
+epa2023 = playByPlay2023 |>
+        filter((!is.na(epa) & defteam == 'PHI') & (posteam == 'DAL' | posteam == 'KC' | posteam == 'MIA' | posteam == 'BUF' | posteam == 'MIN' | posteam == 'LAR')) |>
+  mutate(averageEPA = mean(epa))
+epa2022 = playByPlay2022 |>
+        filter((!is.na(epa) & defteam == 'PHI') & (posteam == 'DET' | posteam == 'DAL' | posteam == 'GB' | posteam == "KC")) |>
+        mutate(
+          averageEPA = mean(epa)
+```

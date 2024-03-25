@@ -1,0 +1,230 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+The [R plugin](https://www.jetbrains.com/help/pycharm/r-plugin-support.html) for IntelliJ-based IDEs provides
+handy capabilities to work with the [R Markdown](https://www.jetbrains.com/help/pycharm/r-markdown.html) files.
+To [add](https://www.jetbrains.com/help/pycharm/r-markdown.html#add-code-chunk) a new R chunk,
+position the caret at any line or the code chunk, then click "+".
+
+The code chunk appears:
+```{r}
+install.packages("htmlTable")
+install.packages("zoo")
+
+
+```
+
+Type any R code in the chunk, for example:
+```{r}
+library(janitor)
+library(tidyverse)
+library(rvest)
+library(htmlTable)
+library(zoo)
+
+```
+
+
+
+
+
+```{r}
+draft = tibble()
+
+```
+
+
+
+
+
+```{r}
+for(i in seq(from = 2000, to = 2022)) {
+  url <- paste0(
+    "https://www.pro-football-reference.com/years/",
+    i,
+    "/draft.htm"
+  )
+  web_data <-
+    read_html(url) |>
+      html_nodes(xpath = '//*[@id="drafts"]') |>
+      html_table()
+  web_df <-
+    web_data[[1]]
+  web_df_clean <-
+    web_df |>
+      janitor::row_to_names(row_number = 1) |>
+      janitor::clean_names(case = "none") |>
+      mutate(Season = i) |>
+      filter(Tm != "Tm")
+
+  draft <-
+    bind_rows(
+      draft, web_df_clean
+    )
+}
+```
+
+
+
+
+
+```{r}
+draft = draft |>
+        mutate(Tm = case_when(Tm == "SDG" ~ "LAC", Tm == "OAK" ~ "LVR", Tm == "STL" ~ "LAR", TRUE ~ Tm),
+               DrAV = ifelse(is.na(DrAV), 0, DrAV))
+write_csv(draft, "draft_data.csv")
+draft = read_csv("draft_data.csv")
+
+
+```
+
+
+
+
+
+```{r}
+draft_use = draft |>
+        select(Season, Pick, Tm, Player, Pos,wAV, DrAV)
+print(draft_use)
+```
+
+
+
+```{r}
+draft_use_pre2019 <-
+        draft_use |>
+                mutate(DrAV = as.numeric(DrAV), wAV = as.numeric(wAV), Pick = as.integer(Pick)) |>
+                filter(Season <= 2019)
+
+ggplot(draft_use_pre2019, aes(Pick, DrAV)) +
+        geom_point(alpha = 0.2) +
+        stat_smooth() +
+        theme_bw()
+
+```
+
+
+
+
+
+
+
+```{r}
+draft_chart =
+        draft_use_pre2019 |>
+                group_by(Pick) |>
+                summarize(mean_DrAV = mean(DrAV, na.rm = TRUE)) |>
+                mutate(mean_DrAV = ifelse(is.na(mean_DrAV), 0, mean_DrAV)) |>
+                mutate(
+                  roll_DrAV = rollapply(
+                    mean_DrAV,
+                    width = 13,
+                    FUN = mean,
+                    na.rm = TRUE,
+                    fill = "extend",
+                    partial = TRUE
+                  )
+                )
+
+
+
+```
+
+
+
+
+
+
+```{r}
+ggplot(draft_chart, aes(Pick, roll_DrAV)) +
+        geom_point() +
+        geom_smooth() +
+        theme_bw() +
+        ylab("Rolling average DrAV") +
+        xlab("Draft Pick")
+
+
+```
+
+
+
+
+```{r}
+DrAV_pick_fit = draft_chart |>
+        lm(formula = log(roll_DrAV + 1) ~ Pick)
+
+
+summary(DrAV_pick_fit)
+```
+
+
+
+
+```{r}
+draft_chart = draft_chart |>
+        mutate(
+          fitted_DrAV = pmax(0, exp(predict(DrAV_pick_fit)) - 1)
+        )
+
+draft_chart |>
+        head()
+```
+
+
+```{r}
+library(kableExtra)
+
+future_pick = tibble(
+  Pick = "Future 2nd Round", Value = "14.8 (discounted at rate of 25%)"
+)
+
+team = tibble("Receiving team" = c("Jets", rep("Colts", 4)))
+
+tbl_1 = draft_chart |>
+        filter(Pick %in% c(3, 6, 37, 49)) |>
+        select(Pick, fitted_DrAV) |>
+        rename(Value = fitted_DrAV) |>
+        mutate(
+          Pick = as.character(Pick),
+          Value = as.character(round(Value, 1))
+        ) |>
+        bind_rows(future_pick)
+
+team |>
+        bind_cols(tbl_1) |>
+        kbl(format = "pipe") |>
+        kable_styling()
+```
+
+
+
+
+```{r}
+draft_use_pre2019 = draft_use_pre2019 |>
+        left_join(draft_chart |> select(Pick, fitted_DrAV), by = "Pick")
+
+draft_use_pre2019 |>
+        group_by(Tm) |>
+        summarize(
+          total_picks = n(),
+          DrAV_OE = mean(DrAV - fitted_DrAV, na.rm = TRUE),
+          DrAV_sigma = sd(DrAV - fitted_DrAV, na.rm = TRUE)
+        ) |>
+        arrange(-DrAV_OE) |>
+        print(n = Inf)
+
+```
+
+
+
+
+
+```{r}
+print(draft_use)
+```
+
+```{r}
+
+```
